@@ -1,0 +1,18 @@
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  telegram_id TEXT UNIQUE
+);
+
+CREATE TABLE items (
+  id INTEGER PRIMARY KEY,
+  title TEXT,
+  type TEXT,
+  poster_path TEXT
+);
+
+CREATE TABLE watch_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  item_id INTEGER,
+  watched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

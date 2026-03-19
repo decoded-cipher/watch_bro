@@ -1,0 +1,8 @@
+name = "movie-bot"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cipher_movie_bot"
+database_id = "314ed97f-dcab-4ef8-9ddc-0b618198a759"
