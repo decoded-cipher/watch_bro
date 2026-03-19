@@ -1,138 +1,58 @@
 import { Hono } from 'hono'
+import { OK, parseCommand, tg } from './src/lib/telegram.js'
+import { handleStart } from './src/commands/start.js'
+import { handleSearch } from './src/commands/search.js'
+import { handleWatched } from './src/commands/watched.js'
+import { handleWatch } from './src/callbacks/watch.js'
+import { handleNext } from './src/callbacks/next.js'
 
 const app = new Hono()
 
-async function sendMessage(token, chatId, text, extra = {}) {
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      ...extra
-    })
-  })
-}
-
-async function getUser(DB, telegramId) {
-  let user = await DB.prepare(
-    `SELECT * FROM users WHERE telegram_id = ?`
-  ).bind(telegramId).first()
-
-  if (!user) {
-    const res = await DB.prepare(
-      `INSERT INTO users (telegram_id) VALUES (?)`
-    ).bind(telegramId).run()
-
-    user = { id: res.meta.last_row_id }
-  }
-
-  return user
-}
-
-async function searchTMDB(apiKey, query) {
-  const res = await fetch(
-    `https://api.themoviedb.org/3/search/multi?api_key=${apiKey}&query=${encodeURIComponent(query)}`
-  )
-  const data = await res.json()
-  return data.results.slice(0, 5)
-}
-
 app.post('/webhook', async (c) => {
   const body = await c.req.json()
-  const { BOT_TOKEN, TMDB_API_KEY, DB } = c.env
+  const env = c.env
 
   if (body.message) {
-    const msg = body.message
-    const chatId = msg.chat.id
-    const text = msg.text || ''
-    const telegramId = String(msg.from.id)
+    const chatId = body.message.chat.id
+    const text = (body.message.text || '').trim()
+    const telegramId = String(body.message.from.id)
 
-    const user = await getUser(DB, telegramId)
+    if (!text) return OK()
 
-    if (text === '/start') {
-      await sendMessage(BOT_TOKEN, chatId,
-        `🎬 Movie Tracker Bot\n\n/search <movie>\nTap 👁 to log watching`
-      )
+    const { command, args } = parseCommand(text)
+
+    if (command === 'start' || command === 'help') return handleStart(env, chatId)
+    if (command === 'search') return handleSearch(env, chatId, args)
+    if (command === 'watched') return handleWatched(env, chatId, telegramId)
+
+    if (command) {
+      await tg(env.BOT_TOKEN, 'sendMessage', {
+        chat_id: chatId, text: 'Unknown command. Try /help', parse_mode: 'HTML'
+      })
+      return OK()
     }
 
-    else if (text.startsWith('/search')) {
-      const query = text.replace('/search', '').trim()
-      if (!query) {
-        return sendMessage(BOT_TOKEN, chatId, 'Give a movie name 😅')
-      }
-
-      const results = await searchTMDB(TMDB_API_KEY, query)
-
-      for (const item of results) {
-        const title = item.title || item.name
-        const id = item.id
-
-        await DB.prepare(`
-          INSERT OR IGNORE INTO items (id, title, type, poster_path)
-          VALUES (?, ?, ?, ?)
-        `).bind(id, title, item.media_type, item.poster_path).run()
-
-        await sendMessage(BOT_TOKEN, chatId, title, {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '👁 Watched', callback_data: `watch_${id}` }
-              ]
-            ]
-          }
-        })
-      }
-    }
-
-    else if (text === '/watched') {
-      const rows = await DB.prepare(`
-        SELECT items.title, watch_events.watched_at
-        FROM watch_events
-        JOIN items ON items.id = watch_events.item_id
-        WHERE watch_events.user_id = ?
-        ORDER BY watch_events.watched_at DESC
-        LIMIT 5
-      `).bind(user.id).all()
-
-      if (rows.results.length === 0) {
-        return sendMessage(BOT_TOKEN, chatId, 'Nothing watched yet 👀')
-      }
-
-      let msgText = '📅 Recent Watches:\n\n'
-      for (const r of rows.results) {
-        msgText += `• ${r.title}\n`
-      }
-
-      await sendMessage(BOT_TOKEN, chatId, msgText)
-    }
+    return OK()
   }
 
   if (body.callback_query) {
     const cb = body.callback_query
-    const data = cb.data
+    const cbData = cb.data || ''
     const chatId = cb.message.chat.id
     const telegramId = String(cb.from.id)
 
-    const user = await getUser(DB, telegramId)
+    if (cbData.startsWith('watch_')) return handleWatch(env, cb, chatId, telegramId)
+    if (cbData.startsWith('next_')) return handleNext(env, cb, chatId)
 
-    if (data.startsWith('watch_')) {
-      const itemId = data.split('_')[1]
-
-      await DB.prepare(`
-        INSERT INTO watch_events (user_id, item_id)
-        VALUES (?, ?)
-      `).bind(user.id, itemId).run()
-
-      await sendMessage(
-        BOT_TOKEN,
-        chatId,
-        '✅ Logged as watched'
-      )
+    if (cbData === 'noop') {
+      await tg(env.BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id })
+      return OK()
     }
+
+    return OK()
   }
 
-  return c.text('ok')
+  return OK()
 })
 
 export default app

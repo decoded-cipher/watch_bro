@@ -1,18 +1,27 @@
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   telegram_id TEXT UNIQUE
 );
 
-CREATE TABLE items (
+CREATE TABLE IF NOT EXISTS items (
   id INTEGER PRIMARY KEY,
   title TEXT,
   type TEXT,
   poster_path TEXT
 );
 
-CREATE TABLE watch_events (
+CREATE TABLE IF NOT EXISTS watch_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
   item_id INTEGER,
   watched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS search_sessions (
+  id TEXT PRIMARY KEY,
+  chat_id INTEGER,
+  results TEXT,
+  current_index INTEGER DEFAULT 0,
+  message_id INTEGER,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
