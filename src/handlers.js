@@ -1,6 +1,6 @@
-import { eq, and, desc } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
-import { users, items, watchEvents, searchSessions } from './schema.js'
+import { items, watchEvents } from './schema.js'
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500'
 
@@ -29,23 +29,18 @@ export function parseCommand(text) {
   return { command: match[1].toLowerCase(), args: match[2].trim() }
 }
 
-// ── DB helpers ──
+const generateId = () => nanoid(12)
 
-async function getUser(db, telegramId) {
-  const [existing] = await db
-    .select().from(users)
-    .where(eq(users.telegramId, telegramId))
+const SESSION_TTL = 600 // 10 minutes
 
-  if (existing) return existing
-
-  await db.insert(users).values({ telegramId })
-  const [created] = await db
-    .select().from(users)
-    .where(eq(users.telegramId, telegramId))
-  return created
+async function getSession(kv, id) {
+  const data = await kv.get(`session:${id}`, 'json')
+  return data
 }
 
-const generateId = () => nanoid(12)
+async function putSession(kv, id, data) {
+  await kv.put(`session:${id}`, JSON.stringify(data), { expirationTtl: SESSION_TTL })
+}
 
 // ── TMDB helpers ──
 
@@ -110,9 +105,8 @@ function buildCaption(item, details, index, total) {
 // ── Search result display ──
 
 async function showResult(env, chatId, session, index) {
-  const { BOT_TOKEN, TMDB_API_KEY, db } = env
-  const resultsList = JSON.parse(session.results)
-  const item = resultsList[index]
+  const { BOT_TOKEN, TMDB_API_KEY, KV, db } = env
+  const item = session.results[index]
 
   await db.insert(items).values({
     id: item.id,
@@ -122,12 +116,12 @@ async function showResult(env, chatId, session, index) {
   }).onConflictDoNothing()
 
   const details = await fetchFullDetails(TMDB_API_KEY, item)
-  const caption = buildCaption(item, details, index, resultsList.length)
+  const caption = buildCaption(item, details, index, session.results.length)
 
   const buttons = [
     [{ text: '👁 Watched', callback_data: `watch_${session.id}_${item.id}` }]
   ]
-  if (index < resultsList.length - 1) {
+  if (index < session.results.length - 1) {
     buttons.push([{ text: 'Not this one ➡️', callback_data: `next_${session.id}` }])
   }
   const keyboard = { reply_markup: { inline_keyboard: buttons } }
@@ -145,15 +139,16 @@ async function showResult(env, chatId, session, index) {
         text: caption, parse_mode: 'HTML', ...keyboard
       })
     }
-    await db.update(searchSessions).set({ currentIndex: index }).where(eq(searchSessions.id, session.id))
+    session.currentIndex = index
+    await putSession(KV, session.id, session)
   } else {
     const sentMsg = item.poster_path
       ? await tg(BOT_TOKEN, 'sendPhoto', { chat_id: chatId, photo: `${TMDB_IMG}${item.poster_path}`, caption, parse_mode: 'HTML', ...keyboard })
       : await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', ...keyboard })
 
-    const messageId = sentMsg.result?.message_id
-    await db.update(searchSessions).set({ currentIndex: index, messageId }).where(eq(searchSessions.id, session.id))
-    session.messageId = messageId
+    session.messageId = sentMsg.result?.message_id
+    session.currentIndex = index
+    await putSession(KV, session.id, session)
   }
 }
 
@@ -165,7 +160,7 @@ export async function handleStart(env, chatId) {
 }
 
 export async function handleSearch(env, chatId, query) {
-  const { BOT_TOKEN, TMDB_API_KEY, db } = env
+  const { BOT_TOKEN, TMDB_API_KEY, KV } = env
 
   if (!query) {
     await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: 'Give a movie name 😅', parse_mode: 'HTML' })
@@ -179,22 +174,20 @@ export async function handleSearch(env, chatId, query) {
   }
 
   const sessionId = generateId()
-  await db.insert(searchSessions).values({ id: sessionId, chatId, results: JSON.stringify(results), currentIndex: 0 })
+  const session = { id: sessionId, chatId, results, currentIndex: 0, messageId: null }
+  await putSession(KV, sessionId, session)
 
-  const session = { id: sessionId, results: JSON.stringify(results), messageId: null }
   await showResult(env, chatId, session, 0)
   return OK()
 }
 
-export async function handleWatched(env, chatId, telegramId) {
+export async function handleWatched(env, chatId) {
   const { BOT_TOKEN, db } = env
-  const user = await getUser(db, telegramId)
 
   const rows = await db
     .select({ title: items.title, type: items.type, watchedAt: watchEvents.watchedAt })
     .from(watchEvents)
     .innerJoin(items, eq(items.id, watchEvents.itemId))
-    .where(eq(watchEvents.userId, user.id))
     .orderBy(desc(watchEvents.watchedAt))
     .limit(10)
 
@@ -216,32 +209,30 @@ export async function handleWatched(env, chatId, telegramId) {
 
 // ── Callback handlers ──
 
-export async function handleWatch(env, cb, chatId, telegramId) {
-  const { BOT_TOKEN, db } = env
+export async function handleWatch(env, cb, chatId) {
+  const { BOT_TOKEN, KV, db } = env
   const parts = cb.data.split('_')
   const sessionId = parts[1]
   const itemId = Number(parts[2])
-  const user = await getUser(db, telegramId)
 
   const [existing] = await db
     .select({ id: watchEvents.id }).from(watchEvents)
-    .where(and(eq(watchEvents.userId, user.id), eq(watchEvents.itemId, itemId)))
+    .where(eq(watchEvents.itemId, itemId))
 
   if (existing) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'Already in your watch list ✅' })
     return OK()
   }
 
-  await db.insert(watchEvents).values({ userId: user.id, itemId })
+  await db.insert(watchEvents).values({ id: generateId(), itemId })
 
   const [item] = await db.select({ title: items.title }).from(items).where(eq(items.id, itemId))
   await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: `✅ Logged "${item?.title || 'movie'}" as watched!` })
 
-  const [session] = await db.select().from(searchSessions).where(eq(searchSessions.id, sessionId))
+  const session = await getSession(KV, sessionId)
   if (session) {
-    const resultsList = JSON.parse(session.results)
     const buttons = [[{ text: '✅ Watched!', callback_data: 'noop' }]]
-    if (session.currentIndex < resultsList.length - 1) {
+    if (session.currentIndex < session.results.length - 1) {
       buttons.push([{ text: 'Not this one ➡️', callback_data: `next_${sessionId}` }])
     }
     await tg(BOT_TOKEN, 'editMessageReplyMarkup', { chat_id: chatId, message_id: session.messageId, reply_markup: { inline_keyboard: buttons } })
@@ -251,20 +242,19 @@ export async function handleWatch(env, cb, chatId, telegramId) {
 }
 
 export async function handleNext(env, cb, chatId) {
-  const { BOT_TOKEN, db } = env
+  const { BOT_TOKEN, KV } = env
   const sessionId = cb.data.split('_')[1]
 
-  const [session] = await db.select().from(searchSessions).where(eq(searchSessions.id, sessionId))
+  const session = await getSession(KV, sessionId)
 
   if (!session) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'Session expired, search again' })
     return OK()
   }
 
-  const resultsList = JSON.parse(session.results)
   const nextIndex = session.currentIndex + 1
 
-  if (nextIndex >= resultsList.length) {
+  if (nextIndex >= session.results.length) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'No more results' })
     return OK()
   }

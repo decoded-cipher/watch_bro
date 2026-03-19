@@ -1,5 +1,5 @@
 {
-  "name": "movie-bot",
+  "name": "watch_bro",
   "version": "1.0.0",
   "description": "Telegram movie tracker bot on Cloudflare Workers",
   "private": true,

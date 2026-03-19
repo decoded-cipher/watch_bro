@@ -10,12 +10,11 @@ const app = new Hono()
 
 app.post('/webhook', async (c) => {
   const body = await c.req.json()
-  const env = { ...c.env, db: drizzle(c.env.DB) }
+  const env = { ...c.env, db: drizzle(c.env.DB), KV: c.env.KV }
 
   if (body.message) {
     const chatId = body.message.chat.id
     const text = (body.message.text || '').trim()
-    const telegramId = String(body.message.from.id)
 
     if (!text) return OK()
 
@@ -23,7 +22,7 @@ app.post('/webhook', async (c) => {
 
     if (command === 'start' || command === 'help') return handleStart(env, chatId)
     if (command === 'search') return handleSearch(env, chatId, args)
-    if (command === 'watched') return handleWatched(env, chatId, telegramId)
+    if (command === 'watched') return handleWatched(env, chatId)
 
     if (command) {
       await tg(env.BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: 'Unknown command. Try /help', parse_mode: 'HTML' })
@@ -37,9 +36,8 @@ app.post('/webhook', async (c) => {
     const cb = body.callback_query
     const cbData = cb.data || ''
     const chatId = cb.message.chat.id
-    const telegramId = String(cb.from.id)
 
-    if (cbData.startsWith('watch_')) return handleWatch(env, cb, chatId, telegramId)
+    if (cbData.startsWith('watch_')) return handleWatch(env, cb, chatId)
     if (cbData.startsWith('next_')) return handleNext(env, cb, chatId)
 
     if (cbData === 'noop') {

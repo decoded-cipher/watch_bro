@@ -7,3 +7,7 @@ binding = "DB"
 database_name = "cipher_movie_bot"
 database_id = "314ed97f-dcab-4ef8-9ddc-0b618198a759"
 migrations_dir = "drizzle"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "ec0292ac19484ac7a47e5af61b5fb281"
