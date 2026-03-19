@@ -1,16 +1,16 @@
 import { Hono } from 'hono'
-import { OK, parseCommand, tg } from './src/lib/telegram.js'
-import { handleStart } from './src/commands/start.js'
-import { handleSearch } from './src/commands/search.js'
-import { handleWatched } from './src/commands/watched.js'
-import { handleWatch } from './src/callbacks/watch.js'
-import { handleNext } from './src/callbacks/next.js'
+import { drizzle } from 'drizzle-orm/d1'
+import {
+  OK, tg, parseCommand,
+  handleStart, handleSearch, handleWatched,
+  handleWatch, handleNext
+} from './src/handlers.js'
 
 const app = new Hono()
 
 app.post('/webhook', async (c) => {
   const body = await c.req.json()
-  const env = c.env
+  const env = { ...c.env, db: drizzle(c.env.DB) }
 
   if (body.message) {
     const chatId = body.message.chat.id
@@ -26,9 +26,7 @@ app.post('/webhook', async (c) => {
     if (command === 'watched') return handleWatched(env, chatId, telegramId)
 
     if (command) {
-      await tg(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: chatId, text: 'Unknown command. Try /help', parse_mode: 'HTML'
-      })
+      await tg(env.BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: 'Unknown command. Try /help', parse_mode: 'HTML' })
       return OK()
     }
 

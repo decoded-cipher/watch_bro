@@ -10,11 +10,16 @@
   "scripts": {
     "dev": "bunx wrangler dev",
     "deploy": "bunx wrangler deploy",
-    "db:migrate:local": "bunx wrangler d1 execute cipher_movie_bot --local --file=schema.sql",
-    "db:migrate:remote": "bunx wrangler d1 execute cipher_movie_bot --remote --file=schema.sql"
+    "db:generate": "bunx drizzle-kit generate",
+    "db:migrate:local": "bunx wrangler d1 migrations apply cipher_movie_bot --local",
+    "db:migrate:remote": "bunx wrangler d1 migrations apply cipher_movie_bot --remote"
   },
   "dependencies": {
-    "hono": "^4.12.8"
+    "drizzle-orm": "^0.45.1",
+    "hono": "^4.12.8",
+    "nanoid": "^5.1.7"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10"
+  }
 }
