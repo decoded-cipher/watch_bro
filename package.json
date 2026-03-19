@@ -8,11 +8,11 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "bunx wrangler dev",
-    "deploy": "bunx wrangler deploy",
-    "db:generate": "bunx drizzle-kit generate",
-    "db:migrate:local": "bunx wrangler d1 migrations apply cipher_movie_bot --local",
-    "db:migrate:remote": "bunx wrangler d1 migrations apply cipher_movie_bot --remote"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply cipher_movie_bot --local",
+    "db:migrate:remote": "wrangler d1 migrations apply cipher_movie_bot --remote"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.1",
