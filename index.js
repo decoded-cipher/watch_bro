@@ -21,15 +21,10 @@ app.post('/webhook', async (c) => {
     const { command, args } = parseCommand(text)
 
     if (command === 'start' || command === 'help') return handleStart(env, chatId)
-    if (command === 'search') return handleSearch(env, chatId, args)
     if (command === 'watched') return handleWatched(env, chatId)
+    if (command) return OK()
 
-    if (command) {
-      await tg(env.BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: 'Unknown command. Try /help', parse_mode: 'HTML' })
-      return OK()
-    }
-
-    return OK()
+    return handleSearch(env, chatId, text)
   }
 
   if (body.callback_query) {

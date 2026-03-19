@@ -6,7 +6,7 @@ const TMDB_IMG = 'https://image.tmdb.org/t/p/w500'
 
 const HELP_TEXT =
   '🎬 <b>Movie Tracker Bot</b>\n\n' +
-  '/search &lt;movie&gt; — Find movies &amp; TV shows\n' +
+  'Just type a movie or show name to search\n' +
   '/watched — See your watch history\n\n' +
   'Tap 👁 to log it, or ➡️ to skip!'
 
