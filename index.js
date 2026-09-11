@@ -9,22 +9,14 @@ import { parseCallback } from './src/callback.js'
 
 const app = new Hono()
 
-app.post('/webhook', async (c) => {
-  const secret = c.env.WEBHOOK_SECRET
-  if (!secret || c.req.header('x-telegram-bot-api-secret-token') !== secret) {
-    return c.text('forbidden', 403)
-  }
-
-  const body = await c.req.json()
-  const env = { ...c.env, db: drizzle(c.env.DB), KV: c.env.KV }
-
+async function route(env, body) {
   if (body.message) {
     const chatId = body.message.chat.id
     const text = (body.message.text || '').trim()
 
     if (!text) return OK()
 
-    const { command, args } = parseCommand(text)
+    const { command } = parseCommand(text)
 
     if (command === 'start' || command === 'help') return handleStart(env, chatId)
     if (command === 'watched') return handleWatched(env, chatId)
@@ -47,11 +39,25 @@ app.post('/webhook', async (c) => {
       await tg(env.BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id })
       return OK()
     }
-
-    return OK()
   }
 
   return OK()
+}
+
+app.post('/webhook', async (c) => {
+  const secret = c.env.WEBHOOK_SECRET
+  if (!secret || c.req.header('x-telegram-bot-api-secret-token') !== secret) {
+    return c.text('forbidden', 403)
+  }
+
+  try {
+    const body = await c.req.json()
+    const env = { ...c.env, db: drizzle(c.env.DB), KV: c.env.KV }
+    return await route(env, body)
+  } catch (err) {
+    console.error('webhook', err)
+    return OK()
+  }
 })
 
 export default app
