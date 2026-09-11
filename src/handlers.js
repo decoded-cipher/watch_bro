@@ -213,7 +213,7 @@ export async function handleWatched(env, chatId) {
 // ── Callback handlers ──
 
 export async function handleWatch(env, cb, chatId, args) {
-  const { BOT_TOKEN, db } = env
+  const { BOT_TOKEN } = env
   const itemId = asId(args[1])
 
   if (!itemId) {
@@ -223,30 +223,30 @@ export async function handleWatch(env, cb, chatId, args) {
     return OK()
   }
 
+  await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: '✅ Watched' })
+  env.waitUntil(logWatch(env, cb, chatId, itemId))
+  return OK()
+}
+
+async function logWatch(env, cb, chatId, itemId) {
+  const { BOT_TOKEN, db } = env
+
   const [existing] = await db
     .select({ id: watchEvents.id }).from(watchEvents)
     .where(eq(watchEvents.itemId, itemId))
 
-  if (existing) {
-    await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'Already in your watch list ✅' })
-    return OK()
+  if (!existing) {
+    await db.insert(watchEvents).values({ id: generateId(), itemId })
   }
 
-  await db.insert(watchEvents).values({ id: generateId(), itemId })
-
-  const [item] = await db.select({ title: items.title }).from(items).where(eq(items.id, itemId))
-  await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: `✅ Logged "${item?.title || 'movie'}" as watched!` })
-
   const rows = cb.message?.reply_markup?.inline_keyboard || []
-  const buttons = [[{ text: '✅ Watched!', callback_data: NOOP }], ...rows.slice(1)]
+  const label = existing ? '✅ Already watched' : '✅ Watched!'
 
   await tg(BOT_TOKEN, 'editMessageReplyMarkup', {
     chat_id: chatId,
     message_id: cb.message.message_id,
-    reply_markup: { inline_keyboard: buttons }
+    reply_markup: { inline_keyboard: [[{ text: label, callback_data: NOOP }], ...rows.slice(1)] }
   })
-
-  return OK()
 }
 
 export async function handlePage(env, cb, chatId, args) {
@@ -267,6 +267,6 @@ export async function handlePage(env, cb, chatId, args) {
   }
 
   await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id })
-  await showResult(env, chatId, session, index)
+  env.waitUntil(showResult(env, chatId, session, index))
   return OK()
 }

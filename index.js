@@ -52,7 +52,12 @@ app.post('/webhook', async (c) => {
 
   try {
     const body = await c.req.json()
-    const env = { ...c.env, db: drizzle(c.env.DB), KV: c.env.KV }
+    const env = {
+      ...c.env,
+      db: drizzle(c.env.DB),
+      KV: c.env.KV,
+      waitUntil: (p) => c.executionCtx.waitUntil(p.catch(err => console.error('background', err)))
+    }
     return await route(env, body)
   } catch (err) {
     console.error('webhook', err)
