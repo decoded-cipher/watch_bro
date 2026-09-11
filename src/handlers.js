@@ -1,7 +1,14 @@
 import { asId, asIndex, watchData, pageData, NOOP } from './callback.js'
-import { insertItem, recentWatches, hasWatched, insertWatch } from './db.js'
+import { insertItem, recentWatches, hasWatched, insertWatch, today } from './db.js'
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500'
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function formatDay(iso) {
+  const [, m, d] = (iso || '').split('-')
+  return m ? `${Number(d)} ${MONTHS[Number(m) - 1]}` : ''
+}
 
 const HELP_TEXT =
   '🎬 <b>Movie Tracker Bot</b>\n\n' +
@@ -190,9 +197,10 @@ export async function handleWatched(env, chatId) {
 
   let msg = '📅 <b>Recent Watches</b>\n'
   for (const r of rows) {
-    const icon = r.type === 'movie' ? '🎬' : '📺'
-    const date = r.watched_at ? new Date(r.watched_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''
-    msg += `\n${icon} ${r.title}${date ? `  <i>${date}</i>` : ''}`
+    const icon = r.media_type === 'movie' ? '🎬' : '📺'
+    const date = formatDay(r.watched_on)
+    const stars = r.rating ? `  ${'★'.repeat(r.rating)}` : ''
+    msg += `\n${icon} ${r.title}${r.year ? ` (${r.year})` : ''}${stars}${date ? `  <i>${date}</i>` : ''}`
   }
 
   await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: msg, parse_mode: 'HTML' })
@@ -204,6 +212,7 @@ export async function handleWatched(env, chatId) {
 export async function handleWatch(env, cb, chatId, args) {
   const { BOT_TOKEN } = env
   const itemId = asId(args[1])
+  const userId = cb.from?.id ?? 0
 
   if (!itemId) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', {
@@ -213,17 +222,22 @@ export async function handleWatch(env, cb, chatId, args) {
   }
 
   await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: '✅ Watched' })
-  env.waitUntil(logWatch(env, cb, chatId, itemId))
+  env.waitUntil(logWatch(env, cb, chatId, itemId, userId))
   return OK()
 }
 
-async function logWatch(env, cb, chatId, itemId) {
+async function logWatch(env, cb, chatId, itemId, userId) {
   const { BOT_TOKEN } = env
 
   const existing = await hasWatched(env, itemId)
 
   if (!existing) {
-    await insertWatch(env, generateId(), itemId)
+    await insertWatch(env, {
+      id: generateId(),
+      userId,
+      itemId,
+      watchedOn: today(env.TIMEZONE)
+    })
   }
 
   const rows = cb.message?.reply_markup?.inline_keyboard || []
