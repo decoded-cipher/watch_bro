@@ -1,5 +1,4 @@
 import { eq, desc } from 'drizzle-orm'
-import { nanoid } from 'nanoid'
 import { items, watchEvents } from './schema.js'
 import { asId, asIndex, watchData, pageData, NOOP } from './callback.js'
 
@@ -30,7 +29,10 @@ export function parseCommand(text) {
   return { command: match[1].toLowerCase(), args: match[2].trim() }
 }
 
-const generateId = () => nanoid(12)
+const generateId = () =>
+  [...crypto.getRandomValues(new Uint8Array(6))]
+    .map(b => b.toString(36).padStart(2, '0'))
+    .join('')
 
 const SESSION_TTL = 600 // 10 minutes
 
