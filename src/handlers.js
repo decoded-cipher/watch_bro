@@ -1,6 +1,7 @@
 import { eq, desc } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { items, watchEvents } from './schema.js'
+import { asId, asIndex, watchData, pageData, NOOP } from './callback.js'
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500'
 
@@ -119,10 +120,10 @@ async function showResult(env, chatId, session, index) {
   const caption = buildCaption(item, details, index, session.results.length)
 
   const buttons = [
-    [{ text: '👁 Watched', callback_data: `watch_${session.id}_${item.id}` }]
+    [{ text: '👁 Watched', callback_data: watchData(item) }]
   ]
   if (index < session.results.length - 1) {
-    buttons.push([{ text: 'Not this one ➡️', callback_data: `next_${session.id}` }])
+    buttons.push([{ text: 'Not this one ➡️', callback_data: pageData(session.id, index + 1) }])
   }
   const keyboard = { reply_markup: { inline_keyboard: buttons } }
 
@@ -209,11 +210,16 @@ export async function handleWatched(env, chatId) {
 
 // ── Callback handlers ──
 
-export async function handleWatch(env, cb, chatId) {
-  const { BOT_TOKEN, KV, db } = env
-  const parts = cb.data.split('_')
-  const sessionId = parts[1]
-  const itemId = Number(parts[2])
+export async function handleWatch(env, cb, chatId, args) {
+  const { BOT_TOKEN, db } = env
+  const itemId = asId(args[1])
+
+  if (!itemId) {
+    await tg(BOT_TOKEN, 'answerCallbackQuery', {
+      callback_query_id: cb.id, text: 'That button is no longer valid, search again'
+    })
+    return OK()
+  }
 
   const [existing] = await db
     .select({ id: watchEvents.id }).from(watchEvents)
@@ -229,37 +235,36 @@ export async function handleWatch(env, cb, chatId) {
   const [item] = await db.select({ title: items.title }).from(items).where(eq(items.id, itemId))
   await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: `✅ Logged "${item?.title || 'movie'}" as watched!` })
 
-  const session = await getSession(KV, sessionId)
-  if (session) {
-    const buttons = [[{ text: '✅ Watched!', callback_data: 'noop' }]]
-    if (session.currentIndex < session.results.length - 1) {
-      buttons.push([{ text: 'Not this one ➡️', callback_data: `next_${sessionId}` }])
-    }
-    await tg(BOT_TOKEN, 'editMessageReplyMarkup', { chat_id: chatId, message_id: session.messageId, reply_markup: { inline_keyboard: buttons } })
-  }
+  const rows = cb.message?.reply_markup?.inline_keyboard || []
+  const buttons = [[{ text: '✅ Watched!', callback_data: NOOP }], ...rows.slice(1)]
+
+  await tg(BOT_TOKEN, 'editMessageReplyMarkup', {
+    chat_id: chatId,
+    message_id: cb.message.message_id,
+    reply_markup: { inline_keyboard: buttons }
+  })
 
   return OK()
 }
 
-export async function handleNext(env, cb, chatId) {
+export async function handlePage(env, cb, chatId, args) {
   const { BOT_TOKEN, KV } = env
-  const sessionId = cb.data.split('_')[1]
+  const sessionId = args[0]
+  const index = asIndex(args[1])
 
-  const session = await getSession(KV, sessionId)
+  const session = index === null ? null : await getSession(KV, sessionId)
 
   if (!session) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'Session expired, search again' })
     return OK()
   }
 
-  const nextIndex = session.currentIndex + 1
-
-  if (nextIndex >= session.results.length) {
+  if (index >= session.results.length) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'No more results' })
     return OK()
   }
 
   await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id })
-  await showResult(env, chatId, session, nextIndex)
+  await showResult(env, chatId, session, index)
   return OK()
 }

@@ -3,8 +3,9 @@ import { drizzle } from 'drizzle-orm/d1'
 import {
   OK, tg, parseCommand,
   handleStart, handleSearch, handleWatched,
-  handleWatch, handleNext
+  handleWatch, handlePage
 } from './src/handlers.js'
+import { parseCallback } from './src/callback.js'
 
 const app = new Hono()
 
@@ -29,13 +30,15 @@ app.post('/webhook', async (c) => {
 
   if (body.callback_query) {
     const cb = body.callback_query
-    const cbData = cb.data || ''
     const chatId = cb.message.chat.id
+    const parsed = parseCallback(cb.data)
 
-    if (cbData.startsWith('watch_')) return handleWatch(env, cb, chatId)
-    if (cbData.startsWith('next_')) return handleNext(env, cb, chatId)
+    if (!parsed) return OK()
 
-    if (cbData === 'noop') {
+    if (parsed.action === 'watch') return handleWatch(env, cb, chatId, parsed.args)
+    if (parsed.action === 'page') return handlePage(env, cb, chatId, parsed.args)
+
+    if (parsed.action === 'noop') {
       await tg(env.BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id })
       return OK()
     }
