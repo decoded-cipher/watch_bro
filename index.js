@@ -10,6 +10,11 @@ import { parseCallback } from './src/callback.js'
 const app = new Hono()
 
 app.post('/webhook', async (c) => {
+  const secret = c.env.WEBHOOK_SECRET
+  if (!secret || c.req.header('x-telegram-bot-api-secret-token') !== secret) {
+    return c.text('forbidden', 403)
+  }
+
   const body = await c.req.json()
   const env = { ...c.env, db: drizzle(c.env.DB), KV: c.env.KV }
 

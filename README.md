@@ -48,7 +48,12 @@ Update `wrangler.toml` with the IDs from above.
 ```sh
 wrangler secret put BOT_TOKEN
 wrangler secret put TMDB_API_KEY
+wrangler secret put WEBHOOK_SECRET
 ```
+
+`WEBHOOK_SECRET` is any string of your choosing, 1 to 256 characters from
+`A-Z a-z 0-9 _ -`. Telegram sends it back on every request so the worker can
+reject forged updates. Requests without it are rejected with a 403.
 
 ### 4. Run migrations
 
@@ -66,14 +71,17 @@ npm run deploy
 ### 6. Set webhook
 
 ```
-https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<worker-url>/webhook
+https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<worker-url>/webhook&secret_token=<WEBHOOK_SECRET>
 ```
+
+The `secret_token` must match the `WEBHOOK_SECRET` set above.
 
 ## Project Structure
 
 ```
 index.js           — Hono app, webhook routing
 src/handlers.js    — command + callback handlers
+src/callback.js    — inline button payload encoding
 src/schema.js      — Drizzle table definitions
 drizzle/           — SQL migrations
 wrangler.toml      — Workers + D1 + KV config
