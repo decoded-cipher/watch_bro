@@ -35,15 +35,6 @@ export function parseCommand(text) {
   return { command: match[1].toLowerCase(), args: match[2].trim() }
 }
 
-// Search results are derived from the query and never change, so they are
-// a cache, not state. Written once, never updated.
-const RESULTS_TTL = 604800 // 7 days
-
-const cacheResults = (env, id, results) =>
-  env.KV.put(`s:${id}`, JSON.stringify(results), { expirationTtl: RESULTS_TTL })
-
-const readResults = (env, id) => env.KV.get(`s:${id}`, 'json')
-
 const generateId = () =>
   [...crypto.getRandomValues(new Uint8Array(6))]
     .map(b => b.toString(36).padStart(2, '0'))
@@ -122,20 +113,20 @@ function buildCaption(item, details, index, total) {
 
 // ── Search result display ──
 
-async function showResult(env, chatId, search, index, messageId) {
+async function showResult(env, chatId, results, index, { messageId, replyTo }) {
   const { BOT_TOKEN, TMDB_API_KEY } = env
-  const item = search.results[index]
+  const item = results[index]
 
   await insertItem(env, item)
 
   const details = await fetchFullDetails(TMDB_API_KEY, item)
-  const caption = buildCaption(item, details, index, search.results.length)
+  const caption = buildCaption(item, details, index, results.length)
 
   const buttons = [
     [{ text: '👁 Watched', callback_data: watchData(item) }]
   ]
-  if (index < search.results.length - 1) {
-    buttons.push([{ text: 'Not this one ➡️', callback_data: pageData(search.id, index + 1) }])
+  if (index < results.length - 1) {
+    buttons.push([{ text: 'Not this one ➡️', callback_data: pageData(index + 1) }])
   }
   const keyboard = { reply_markup: { inline_keyboard: buttons } }
 
@@ -152,10 +143,17 @@ async function showResult(env, chatId, search, index, messageId) {
         text: caption, parse_mode: 'HTML', ...keyboard
       })
     }
-  } else if (item.poster_path) {
-    await tg(BOT_TOKEN, 'sendPhoto', { chat_id: chatId, photo: `${TMDB_IMG}${item.poster_path}`, caption, parse_mode: 'HTML', ...keyboard })
+    return
+  }
+
+  // Replying to the search message is what makes paging stateless: the
+  // query comes back to us on every callback as reply_to_message.
+  const base = { chat_id: chatId, reply_to_message_id: replyTo, parse_mode: 'HTML', ...keyboard }
+
+  if (item.poster_path) {
+    await tg(BOT_TOKEN, 'sendPhoto', { ...base, photo: `${TMDB_IMG}${item.poster_path}`, caption })
   } else {
-    await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', ...keyboard })
+    await tg(BOT_TOKEN, 'sendMessage', { ...base, text: caption })
   }
 }
 
@@ -166,7 +164,7 @@ export async function handleStart(env, chatId) {
   return OK()
 }
 
-export async function handleSearch(env, chatId, userId, query) {
+export async function handleSearch(env, chatId, query, replyTo) {
   const { BOT_TOKEN, TMDB_API_KEY } = env
 
   if (!query) {
@@ -180,9 +178,7 @@ export async function handleSearch(env, chatId, userId, query) {
     return OK()
   }
 
-  const id = generateId()
-  await cacheResults(env, id, results)
-  await showResult(env, chatId, { id, results }, 0, null)
+  await showResult(env, chatId, results, 0, { replyTo })
   return OK()
 }
 
@@ -252,22 +248,21 @@ async function logWatch(env, cb, chatId, itemId, userId) {
 }
 
 export async function handlePage(env, cb, chatId, args) {
-  const { BOT_TOKEN } = env
-  const id = args[0]
-  const index = asIndex(args[1])
-  const results = index === null ? null : await readResults(env, id)
+  const { BOT_TOKEN, TMDB_API_KEY } = env
+  const index = asIndex(args[0])
+  const query = cb.message?.reply_to_message?.text?.trim()
 
-  if (!results) {
-    await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'That search expired, send the name again' })
-    return OK()
-  }
-
-  if (index >= results.length) {
-    await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'No more results' })
+  if (index === null || !query) {
+    await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'Send the name again to search' })
     return OK()
   }
 
   await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id })
-  env.waitUntil(showResult(env, chatId, { id, results }, index, cb.message.message_id))
+  env.waitUntil((async () => {
+    const results = await searchTMDB(TMDB_API_KEY, query)
+    if (index < results.length) {
+      await showResult(env, chatId, results, index, { messageId: cb.message.message_id })
+    }
+  })())
   return OK()
 }

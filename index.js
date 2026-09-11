@@ -24,7 +24,6 @@ const authed = async (c, next) => {
 async function route(env, body) {
   if (body.message) {
     const chatId = body.message.chat.id
-    const userId = body.message.from?.id ?? 0
     const text = (body.message.text || '').trim()
 
     if (!text) return OK()
@@ -35,7 +34,7 @@ async function route(env, body) {
     if (command === 'watched') return handleWatched(env, chatId)
     if (command) return OK()
 
-    return handleSearch(env, chatId, userId, text)
+    return handleSearch(env, chatId, text, body.message.message_id)
   }
 
   if (body.callback_query) {

@@ -36,4 +36,4 @@ export function asIndex(value) {
 }
 
 export const watchData = (item) => `w:${MEDIA_CHAR[item.media_type]}:${item.id}`
-export const pageData = (searchId, index) => `p:${searchId}:${index}`
+export const pageData = (index) => `p:${index}`
