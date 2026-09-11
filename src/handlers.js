@@ -1,5 +1,8 @@
 import { asId, asIndex, watchData, pageData, NOOP } from './callback.js'
-import { insertItem, recentWatches, hasWatched, insertWatch, today } from './db.js'
+import {
+  insertItem, recentWatches, hasWatched, insertWatch, today,
+  createSearch, getSearch, updateSearch, pruneSearches
+} from './db.js'
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500'
 
@@ -40,17 +43,6 @@ const generateId = () =>
     .map(b => b.toString(36).padStart(2, '0'))
     .join('')
 
-const SESSION_TTL = 600 // 10 minutes
-
-async function getSession(kv, id) {
-  const data = await kv.get(`session:${id}`, 'json')
-  return data
-}
-
-async function putSession(kv, id, data) {
-  await kv.put(`session:${id}`, JSON.stringify(data), { expirationTtl: SESSION_TTL })
-}
-
 // ── TMDB helpers ──
 
 async function searchTMDB(apiKey, query) {
@@ -63,6 +55,17 @@ async function searchTMDB(apiKey, query) {
     .filter(r => r.media_type === 'movie' || r.media_type === 'tv')
     .filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true })
     .slice(0, 5)
+    .map(r => ({
+      id: r.id,
+      media_type: r.media_type,
+      title: r.title,
+      name: r.name,
+      poster_path: r.poster_path,
+      overview: r.overview,
+      vote_average: r.vote_average,
+      release_date: r.release_date,
+      first_air_date: r.first_air_date
+    }))
 }
 
 async function fetchFullDetails(apiKey, item) {
@@ -113,46 +116,43 @@ function buildCaption(item, details, index, total) {
 
 // ── Search result display ──
 
-async function showResult(env, chatId, session, index) {
-  const { BOT_TOKEN, TMDB_API_KEY, KV } = env
-  const item = session.results[index]
+async function showResult(env, chatId, search, index) {
+  const { BOT_TOKEN, TMDB_API_KEY } = env
+  const item = search.results[index]
 
   await insertItem(env, item)
 
   const details = await fetchFullDetails(TMDB_API_KEY, item)
-  const caption = buildCaption(item, details, index, session.results.length)
+  const caption = buildCaption(item, details, index, search.results.length)
 
   const buttons = [
     [{ text: '👁 Watched', callback_data: watchData(item) }]
   ]
-  if (index < session.results.length - 1) {
-    buttons.push([{ text: 'Not this one ➡️', callback_data: pageData(session.id, index + 1) }])
+  if (index < search.results.length - 1) {
+    buttons.push([{ text: 'Not this one ➡️', callback_data: pageData(search.id, index + 1) }])
   }
   const keyboard = { reply_markup: { inline_keyboard: buttons } }
 
-  if (session.messageId) {
+  if (search.message_id) {
     if (item.poster_path) {
       await tg(BOT_TOKEN, 'editMessageMedia', {
-        chat_id: chatId, message_id: session.messageId,
+        chat_id: chatId, message_id: search.message_id,
         media: { type: 'photo', media: `${TMDB_IMG}${item.poster_path}`, caption, parse_mode: 'HTML' },
         ...keyboard
       })
     } else {
       await tg(BOT_TOKEN, 'editMessageText', {
-        chat_id: chatId, message_id: session.messageId,
+        chat_id: chatId, message_id: search.message_id,
         text: caption, parse_mode: 'HTML', ...keyboard
       })
     }
-    session.currentIndex = index
-    await putSession(KV, session.id, session)
+    await updateSearch(env, search.id, { cursor: index })
   } else {
-    const sentMsg = item.poster_path
+    const sent = item.poster_path
       ? await tg(BOT_TOKEN, 'sendPhoto', { chat_id: chatId, photo: `${TMDB_IMG}${item.poster_path}`, caption, parse_mode: 'HTML', ...keyboard })
       : await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', ...keyboard })
 
-    session.messageId = sentMsg.result?.message_id
-    session.currentIndex = index
-    await putSession(KV, session.id, session)
+    await updateSearch(env, search.id, { cursor: index, messageId: sent.result?.message_id })
   }
 }
 
@@ -163,8 +163,8 @@ export async function handleStart(env, chatId) {
   return OK()
 }
 
-export async function handleSearch(env, chatId, query) {
-  const { BOT_TOKEN, TMDB_API_KEY, KV } = env
+export async function handleSearch(env, chatId, userId, query) {
+  const { BOT_TOKEN, TMDB_API_KEY } = env
 
   if (!query) {
     await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: 'Give a movie name 😅', parse_mode: 'HTML' })
@@ -177,11 +177,11 @@ export async function handleSearch(env, chatId, query) {
     return OK()
   }
 
-  const sessionId = generateId()
-  const session = { id: sessionId, chatId, results, currentIndex: 0, messageId: null }
-  await putSession(KV, sessionId, session)
+  const search = { id: generateId(), userId, query, results, cursor: 0, message_id: null }
+  await createSearch(env, search)
 
-  await showResult(env, chatId, session, 0)
+  await showResult(env, chatId, search, 0)
+  env.waitUntil(pruneSearches(env))
   return OK()
 }
 
@@ -251,23 +251,21 @@ async function logWatch(env, cb, chatId, itemId, userId) {
 }
 
 export async function handlePage(env, cb, chatId, args) {
-  const { BOT_TOKEN, KV } = env
-  const sessionId = args[0]
+  const { BOT_TOKEN } = env
   const index = asIndex(args[1])
+  const search = index === null ? null : await getSearch(env, args[0])
 
-  const session = index === null ? null : await getSession(KV, sessionId)
-
-  if (!session) {
-    await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'Session expired, search again' })
+  if (!search) {
+    await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'That search expired, send the name again' })
     return OK()
   }
 
-  if (index >= session.results.length) {
+  if (index >= search.results.length) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'No more results' })
     return OK()
   }
 
   await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id })
-  env.waitUntil(showResult(env, chatId, session, index))
+  env.waitUntil(showResult(env, chatId, search, index))
   return OK()
 }

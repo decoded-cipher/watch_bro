@@ -7,7 +7,7 @@ Personal Telegram bot for tracking movies and TV shows. Type a name, tap watched
 - **Runtime** — Cloudflare Workers
 - **Framework** — Hono
 - **Database** — Cloudflare D1
-- **Cache** — Cloudflare KV (search sessions, 10 min TTL)
+- **Cache** — Cloudflare KV (reserved for TMDB response caching)
 - **Data** — TMDB API
 
 ## Usage
