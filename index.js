@@ -58,7 +58,16 @@ async function route(env, body) {
 }
 
 app.post('/setup', authed, async (c) => {
-  return c.json(await tg(c.env.BOT_TOKEN, 'setMyCommands', { commands: COMMANDS }))
+  const { BOT_TOKEN, WEBHOOK_SECRET } = c.env
+  const [commands, webhook] = await Promise.all([
+    tg(BOT_TOKEN, 'setMyCommands', { commands: COMMANDS }),
+    tg(BOT_TOKEN, 'setWebhook', {
+      url: `${new URL(c.req.url).origin}/webhook`,
+      secret_token: WEBHOOK_SECRET,
+      allowed_updates: ['message', 'callback_query']
+    })
+  ])
+  return c.json({ commands, webhook })
 })
 
 app.post('/webhook', authed, async (c) => {

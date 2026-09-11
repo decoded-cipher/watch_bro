@@ -68,23 +68,17 @@ npm run db:migrate:remote  # production
 npm run deploy
 ```
 
-### 6. Set webhook
-
-```
-https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<worker-url>/webhook&secret_token=<WEBHOOK_SECRET>
-```
-
-The `secret_token` must match the `WEBHOOK_SECRET` set above.
-
-### 7. Register the command menu
+### 6. Run setup
 
 ```sh
 curl -X POST https://<worker-url>/setup \
   -H "X-Telegram-Bot-Api-Secret-Token: <WEBHOOK_SECRET>"
 ```
 
-Populates the menu button next to the message box. Re-run it whenever the
-command list in `index.js` changes.
+Registers the webhook with a matching `secret_token` and populates the
+command menu. The worker uses its own `BOT_TOKEN`, so the token never has
+to be handled by hand. Re-run it after changing the command list in
+`index.js` or rotating `WEBHOOK_SECRET`.
 
 ## Project Structure
 
