@@ -9,6 +9,19 @@ import { parseCallback } from './src/callback.js'
 
 const app = new Hono()
 
+const COMMANDS = [
+  { command: 'help', description: 'How to use the bot' },
+  { command: 'watched', description: 'Your recent watch history' }
+]
+
+const authed = async (c, next) => {
+  const secret = c.env.WEBHOOK_SECRET
+  if (!secret || c.req.header('x-telegram-bot-api-secret-token') !== secret) {
+    return c.text('forbidden', 403)
+  }
+  await next()
+}
+
 async function route(env, body) {
   if (body.message) {
     const chatId = body.message.chat.id
@@ -44,12 +57,11 @@ async function route(env, body) {
   return OK()
 }
 
-app.post('/webhook', async (c) => {
-  const secret = c.env.WEBHOOK_SECRET
-  if (!secret || c.req.header('x-telegram-bot-api-secret-token') !== secret) {
-    return c.text('forbidden', 403)
-  }
+app.post('/setup', authed, async (c) => {
+  return c.json(await tg(c.env.BOT_TOKEN, 'setMyCommands', { commands: COMMANDS }))
+})
 
+app.post('/webhook', authed, async (c) => {
   try {
     const body = await c.req.json()
     const env = {

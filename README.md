@@ -76,6 +76,16 @@ https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<worker-url>/webh
 
 The `secret_token` must match the `WEBHOOK_SECRET` set above.
 
+### 7. Register the command menu
+
+```sh
+curl -X POST https://<worker-url>/setup \
+  -H "X-Telegram-Bot-Api-Secret-Token: <WEBHOOK_SECRET>"
+```
+
+Populates the menu button next to the message box. Re-run it whenever the
+command list in `index.js` changes.
+
 ## Project Structure
 
 ```
