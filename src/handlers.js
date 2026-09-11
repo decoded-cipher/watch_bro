@@ -1,8 +1,5 @@
 import { asId, asIndex, watchData, pageData, NOOP } from './callback.js'
-import {
-  insertItem, recentWatches, hasWatched, insertWatch, today,
-  createSearch, getSearch, updateSearch, pruneSearches
-} from './db.js'
+import { insertItem, recentWatches, hasWatched, insertWatch, today } from './db.js'
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500'
 
@@ -37,6 +34,15 @@ export function parseCommand(text) {
   if (!match) return { command: null, args: text.trim() }
   return { command: match[1].toLowerCase(), args: match[2].trim() }
 }
+
+// Search results are derived from the query and never change, so they are
+// a cache, not state. Written once, never updated.
+const RESULTS_TTL = 604800 // 7 days
+
+const cacheResults = (env, id, results) =>
+  env.KV.put(`s:${id}`, JSON.stringify(results), { expirationTtl: RESULTS_TTL })
+
+const readResults = (env, id) => env.KV.get(`s:${id}`, 'json')
 
 const generateId = () =>
   [...crypto.getRandomValues(new Uint8Array(6))]
@@ -116,7 +122,7 @@ function buildCaption(item, details, index, total) {
 
 // ── Search result display ──
 
-async function showResult(env, chatId, search, index) {
+async function showResult(env, chatId, search, index, messageId) {
   const { BOT_TOKEN, TMDB_API_KEY } = env
   const item = search.results[index]
 
@@ -133,26 +139,23 @@ async function showResult(env, chatId, search, index) {
   }
   const keyboard = { reply_markup: { inline_keyboard: buttons } }
 
-  if (search.message_id) {
+  if (messageId) {
     if (item.poster_path) {
       await tg(BOT_TOKEN, 'editMessageMedia', {
-        chat_id: chatId, message_id: search.message_id,
+        chat_id: chatId, message_id: messageId,
         media: { type: 'photo', media: `${TMDB_IMG}${item.poster_path}`, caption, parse_mode: 'HTML' },
         ...keyboard
       })
     } else {
       await tg(BOT_TOKEN, 'editMessageText', {
-        chat_id: chatId, message_id: search.message_id,
+        chat_id: chatId, message_id: messageId,
         text: caption, parse_mode: 'HTML', ...keyboard
       })
     }
-    await updateSearch(env, search.id, { cursor: index })
+  } else if (item.poster_path) {
+    await tg(BOT_TOKEN, 'sendPhoto', { chat_id: chatId, photo: `${TMDB_IMG}${item.poster_path}`, caption, parse_mode: 'HTML', ...keyboard })
   } else {
-    const sent = item.poster_path
-      ? await tg(BOT_TOKEN, 'sendPhoto', { chat_id: chatId, photo: `${TMDB_IMG}${item.poster_path}`, caption, parse_mode: 'HTML', ...keyboard })
-      : await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', ...keyboard })
-
-    await updateSearch(env, search.id, { cursor: index, messageId: sent.result?.message_id })
+    await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', ...keyboard })
   }
 }
 
@@ -177,11 +180,9 @@ export async function handleSearch(env, chatId, userId, query) {
     return OK()
   }
 
-  const search = { id: generateId(), userId, query, results, cursor: 0, message_id: null }
-  await createSearch(env, search)
-
-  await showResult(env, chatId, search, 0)
-  env.waitUntil(pruneSearches(env))
+  const id = generateId()
+  await cacheResults(env, id, results)
+  await showResult(env, chatId, { id, results }, 0, null)
   return OK()
 }
 
@@ -252,20 +253,21 @@ async function logWatch(env, cb, chatId, itemId, userId) {
 
 export async function handlePage(env, cb, chatId, args) {
   const { BOT_TOKEN } = env
+  const id = args[0]
   const index = asIndex(args[1])
-  const search = index === null ? null : await getSearch(env, args[0])
+  const results = index === null ? null : await readResults(env, id)
 
-  if (!search) {
+  if (!results) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'That search expired, send the name again' })
     return OK()
   }
 
-  if (index >= search.results.length) {
+  if (index >= results.length) {
     await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id, text: 'No more results' })
     return OK()
   }
 
   await tg(BOT_TOKEN, 'answerCallbackQuery', { callback_query_id: cb.id })
-  env.waitUntil(showResult(env, chatId, search, index))
+  env.waitUntil(showResult(env, chatId, { id, results }, index, cb.message.message_id))
   return OK()
 }

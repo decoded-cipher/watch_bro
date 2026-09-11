@@ -53,28 +53,3 @@ export async function insertWatch(env, { id, userId, itemId, watchedOn }) {
     INSERT INTO watches (id, user_id, item_id, watched_on) VALUES (?, ?, ?, ?)
   `).bind(id, userId, itemId, watchedOn).run()
 }
-
-export async function createSearch(env, { id, userId, query, results }) {
-  await env.DB.prepare(`
-    INSERT INTO searches (id, user_id, query, results) VALUES (?, ?, ?, ?)
-  `).bind(id, userId, query, JSON.stringify(results)).run()
-}
-
-export async function getSearch(env, id) {
-  const row = await env.DB.prepare(`
-    SELECT id, query, results, cursor, message_id FROM searches WHERE id = ?
-  `).bind(id).first()
-  return row ? { ...row, results: JSON.parse(row.results) } : null
-}
-
-export async function updateSearch(env, id, { cursor, messageId }) {
-  await env.DB.prepare(`
-    UPDATE searches SET cursor = ?, message_id = COALESCE(?, message_id) WHERE id = ?
-  `).bind(cursor, messageId ?? null, id).run()
-}
-
-export async function pruneSearches(env) {
-  await env.DB.prepare(`
-    DELETE FROM searches WHERE created_at < datetime('now', '-1 day')
-  `).run()
-}
