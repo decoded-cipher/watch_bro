@@ -6,7 +6,7 @@ Personal Telegram bot for tracking movies and TV shows. Type a name, tap watched
 
 - **Runtime** — Cloudflare Workers
 - **Framework** — Hono
-- **Database** — Cloudflare D1 (via Drizzle ORM)
+- **Database** — Cloudflare D1
 - **Cache** — Cloudflare KV (search sessions, 10 min TTL)
 - **Data** — TMDB API
 
@@ -92,7 +92,7 @@ command list in `index.js` changes.
 index.js           — Hono app, webhook routing
 src/handlers.js    — command + callback handlers
 src/callback.js    — inline button payload encoding
-src/schema.js      — Drizzle table definitions
+src/db.js          — d1 queries
 migrations/        — SQL migrations
 wrangler.toml      — Workers + D1 + KV config
 ```

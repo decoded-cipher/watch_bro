@@ -10,15 +10,10 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply cipher_movie_bot --local",
     "db:migrate:remote": "wrangler d1 migrations apply cipher_movie_bot --remote"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.1",
     "hono": "^4.12.8"
-  },
-  "devDependencies": {
-    "drizzle-kit": "^0.31.10"
   }
 }

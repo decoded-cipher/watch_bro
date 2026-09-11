@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import { drizzle } from 'drizzle-orm/d1'
 import {
   OK, tg, parseCommand,
   handleStart, handleSearch, handleWatched,
@@ -66,8 +65,6 @@ app.post('/webhook', authed, async (c) => {
     const body = await c.req.json()
     const env = {
       ...c.env,
-      db: drizzle(c.env.DB),
-      KV: c.env.KV,
       waitUntil: (p) => c.executionCtx.waitUntil(p.catch(err => console.error('background', err)))
     }
     return await route(env, body)

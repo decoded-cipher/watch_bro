@@ -1,6 +1,5 @@
-import { eq, desc } from 'drizzle-orm'
-import { items, watchEvents } from './schema.js'
 import { asId, asIndex, watchData, pageData, NOOP } from './callback.js'
+import { insertItem, recentWatches, hasWatched, insertWatch } from './db.js'
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500'
 
@@ -108,15 +107,10 @@ function buildCaption(item, details, index, total) {
 // ── Search result display ──
 
 async function showResult(env, chatId, session, index) {
-  const { BOT_TOKEN, TMDB_API_KEY, KV, db } = env
+  const { BOT_TOKEN, TMDB_API_KEY, KV } = env
   const item = session.results[index]
 
-  await db.insert(items).values({
-    id: item.id,
-    title: item.title || item.name,
-    type: item.media_type,
-    posterPath: item.poster_path
-  }).onConflictDoNothing()
+  await insertItem(env, item)
 
   const details = await fetchFullDetails(TMDB_API_KEY, item)
   const caption = buildCaption(item, details, index, session.results.length)
@@ -185,14 +179,9 @@ export async function handleSearch(env, chatId, query) {
 }
 
 export async function handleWatched(env, chatId) {
-  const { BOT_TOKEN, db } = env
+  const { BOT_TOKEN } = env
 
-  const rows = await db
-    .select({ title: items.title, type: items.type, watchedAt: watchEvents.watchedAt })
-    .from(watchEvents)
-    .innerJoin(items, eq(items.id, watchEvents.itemId))
-    .orderBy(desc(watchEvents.watchedAt))
-    .limit(10)
+  const rows = await recentWatches(env)
 
   if (!rows.length) {
     await tg(BOT_TOKEN, 'sendMessage', { chat_id: chatId, text: 'Nothing watched yet 👀', parse_mode: 'HTML' })
@@ -202,7 +191,7 @@ export async function handleWatched(env, chatId) {
   let msg = '📅 <b>Recent Watches</b>\n'
   for (const r of rows) {
     const icon = r.type === 'movie' ? '🎬' : '📺'
-    const date = r.watchedAt ? new Date(r.watchedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''
+    const date = r.watched_at ? new Date(r.watched_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''
     msg += `\n${icon} ${r.title}${date ? `  <i>${date}</i>` : ''}`
   }
 
@@ -229,14 +218,12 @@ export async function handleWatch(env, cb, chatId, args) {
 }
 
 async function logWatch(env, cb, chatId, itemId) {
-  const { BOT_TOKEN, db } = env
+  const { BOT_TOKEN } = env
 
-  const [existing] = await db
-    .select({ id: watchEvents.id }).from(watchEvents)
-    .where(eq(watchEvents.itemId, itemId))
+  const existing = await hasWatched(env, itemId)
 
   if (!existing) {
-    await db.insert(watchEvents).values({ id: generateId(), itemId })
+    await insertWatch(env, generateId(), itemId)
   }
 
   const rows = cb.message?.reply_markup?.inline_keyboard || []
