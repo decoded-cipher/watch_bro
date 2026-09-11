@@ -93,6 +93,6 @@ index.js           — Hono app, webhook routing
 src/handlers.js    — command + callback handlers
 src/callback.js    — inline button payload encoding
 src/schema.js      — Drizzle table definitions
-drizzle/           — SQL migrations
+migrations/        — SQL migrations
 wrangler.toml      — Workers + D1 + KV config
 ```
